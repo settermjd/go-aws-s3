@@ -17,7 +17,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-type S3Uploader struct {
+type S3BucketManager struct {
 	bucketName string
 	client     *s3.Client
 	session    *session.Session
@@ -31,11 +31,11 @@ type SimpleS3BucketItem struct {
 
 // ListFiles retrieves a list of files from an S3 bucket and returns a short
 // list of them in JSON format
-func (r S3Uploader) ListFiles(c *fiber.Ctx) error {
-	result, err := r.client.ListObjectsV2(
+func (manager S3BucketManager) ListFiles(c *fiber.Ctx) error {
+	result, err := manager.client.ListObjectsV2(
 		context.TODO(),
 		&s3.ListObjectsV2Input{
-			Bucket: aws.String(r.bucketName),
+			Bucket: aws.String(manager.bucketName),
 		},
 	)
 	if err != nil {
@@ -43,7 +43,7 @@ func (r S3Uploader) ListFiles(c *fiber.Ctx) error {
 			"error": true,
 			"msg": fmt.Sprintf(
 				"Couldn't list objects in bucket %s. Reason: %v\n",
-				r.bucketName,
+				manager.bucketName,
 				err,
 			),
 		})
@@ -67,7 +67,7 @@ func (r S3Uploader) ListFiles(c *fiber.Ctx) error {
 }
 
 // UploadFile uploads a file received in a POST request to an S3 bucket
-func (r S3Uploader) UploadFile(c *fiber.Ctx) error {
+func (manager S3BucketManager) UploadFile(c *fiber.Ctx) error {
 	// Attempt to retrieve the uploaded file
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -88,8 +88,8 @@ func (r S3Uploader) UploadFile(c *fiber.Ctx) error {
 	defer fileBuffer.Close()
 
 	// Upload the file to S3.
-	_, err = r.client.PutObject(context.TODO(), &s3.PutObjectInput{
-		Bucket: aws.String(r.bucketName),
+	_, err = manager.client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket: aws.String(manager.bucketName),
 		Key:    aws.String(file.Filename),
 		Body:   fileBuffer,
 	})
@@ -112,20 +112,20 @@ func (r S3Uploader) UploadFile(c *fiber.Ctx) error {
 // file with the downloaded file's contents, before using Fiber's Download()
 // method to send the file to the client. For more information, check out
 // https://docs.gofiber.io/api/ctx#download
-func (r S3Uploader) DownloadFile(c *fiber.Ctx) error {
+func (manager S3BucketManager) DownloadFile(c *fiber.Ctx) error {
 	// Download the file from the S3 bucket
 	filename := c.Params("filename")
 	log.Printf("User requested to download file: %s", filename)
 
-	result, err := r.client.GetObject(context.TODO(), &s3.GetObjectInput{
-		Bucket: aws.String(r.bucketName),
+	result, err := manager.client.GetObject(context.TODO(), &s3.GetObjectInput{
+		Bucket: aws.String(manager.bucketName),
 		Key:    aws.String(filename),
 	})
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).
 			JSON(fiber.Map{
 				"error": true,
-				"msg":   fmt.Sprintf("Couldn't download file %s from bucket %s. Reason: %v.\n", filename, r.bucketName, err),
+				"msg":   fmt.Sprintf("Couldn't download file %s from bucket %s. Reason: %v.\n", filename, manager.bucketName, err),
 			})
 	}
 	defer result.Body.Close()
@@ -167,7 +167,7 @@ func (r S3Uploader) DownloadFile(c *fiber.Ctx) error {
 }
 
 // DeleteFile deletes a single file/object from an S3 bucket.
-func (r S3Uploader) DeleteFile(c *fiber.Ctx) error {
+func (manager S3BucketManager) DeleteFile(c *fiber.Ctx) error {
 	filename := c.Params("filename")
 	if len(filename) == 0 {
 		return c.Status(fiber.StatusOK).
@@ -178,8 +178,8 @@ func (r S3Uploader) DeleteFile(c *fiber.Ctx) error {
 	}
 	log.Printf("User requested to download file: %s", filename)
 
-	_, err := r.client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
-		Bucket: &r.bucketName,
+	_, err := manager.client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+		Bucket: &manager.bucketName,
 		Key:    &filename,
 	})
 	if err != nil {
@@ -215,7 +215,7 @@ func main() {
 
 	// Create an Amazon S3 service client
 	client := s3.NewFromConfig(cfg)
-	s3 := S3Uploader{
+	manager := S3BucketManager{
 		bucketName: os.Getenv("S3_BUCKET"),
 		client:     client,
 	}
@@ -224,10 +224,10 @@ func main() {
 
 	app.Use(recover.New())
 
-	app.Post("/", s3.UploadFile)
-	app.Get("/", s3.ListFiles)
-	app.Get("/:filename", s3.DownloadFile)
-	app.Delete("/:filename", s3.DeleteFile)
+	app.Post("/", manager.UploadFile)
+	app.Get("/", manager.ListFiles)
+	app.Get("/:filename", manager.DownloadFile)
+	app.Delete("/:filename", manager.DeleteFile)
 
 	log.Fatal(app.Listen(":3000"))
 }
