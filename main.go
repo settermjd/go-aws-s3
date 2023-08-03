@@ -124,7 +124,7 @@ func (r S3Uploader) DownloadFile(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).
 			JSON(fiber.Map{
-				"error": false,
+				"error": true,
 				"msg":   fmt.Sprintf("Couldn't download file %s from bucket %s. Reason: %v.\n", filename, r.bucketName, err),
 			})
 	}
@@ -135,7 +135,7 @@ func (r S3Uploader) DownloadFile(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).
 			JSON(fiber.Map{
-				"error": false,
+				"error": true,
 				"msg":   fmt.Sprintf("Couldn't create a temporary file to store the downloaded file. Reason: %v.\n", err),
 			})
 	}
@@ -145,7 +145,7 @@ func (r S3Uploader) DownloadFile(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).
 			JSON(fiber.Map{
-				"error": false,
+				"error": true,
 				"msg":   fmt.Sprintf("Could not read contents of downloaded file. Reason: %v.\n", err),
 			})
 	}
@@ -154,7 +154,7 @@ func (r S3Uploader) DownloadFile(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).
 			JSON(fiber.Map{
-				"error": false,
+				"error": true,
 				"msg":   fmt.Sprintf("Could not create temporary file with contents of downloaded file. Reason: %v.\n", err),
 			})
 	}
