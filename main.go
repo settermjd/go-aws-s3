@@ -166,6 +166,37 @@ func (r S3Uploader) DownloadFile(c *fiber.Ctx) error {
 	return c.Download(file.Name(), filename)
 }
 
+// DeleteFile deletes a single file/object from an S3 bucket.
+func (r S3Uploader) DeleteFile(c *fiber.Ctx) error {
+	filename := c.Params("filename")
+	if len(filename) == 0 {
+		return c.Status(fiber.StatusOK).
+			JSON(fiber.Map{
+				"error": true,
+				"msg":   fmt.Sprint("The name of the file to be deleted was not provided."),
+			})
+	}
+	log.Printf("User requested to download file: %s", filename)
+
+	_, err := r.client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+		Bucket: &r.bucketName,
+		Key:    &filename,
+	})
+	if err != nil {
+		return c.Status(fiber.StatusOK).
+			JSON(fiber.Map{
+				"error": true,
+				"msg":   fmt.Sprintf("File %s could not be deleted. Reason: %v", filename, err),
+			})
+	}
+
+	return c.Status(fiber.StatusOK).
+		JSON(fiber.Map{
+			"error": false,
+			"msg":   fmt.Sprintf("File (%s) has been deleted", filename),
+		})
+}
+
 func main() {
 	// Load environment variables from the .env file
 	err := godotenv.Load()
@@ -196,6 +227,7 @@ func main() {
 	app.Post("/", s3.UploadFile)
 	app.Get("/", s3.ListFiles)
 	app.Get("/:filename", s3.DownloadFile)
+	app.Delete("/:filename", s3.DeleteFile)
 
 	log.Fatal(app.Listen(":3000"))
 }
