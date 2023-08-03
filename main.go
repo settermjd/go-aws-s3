@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"time"
@@ -107,6 +108,64 @@ func (r S3Uploader) UploadFile(c *fiber.Ctx) error {
 	})
 }
 
+// DownloadFile downloads a file from an S3 bucket, then creates a temporary
+// file with the downloaded file's contents, before using Fiber's Download()
+// method to send the file to the client. For more information, check out
+// https://docs.gofiber.io/api/ctx#download
+func (r S3Uploader) DownloadFile(c *fiber.Ctx) error {
+	// Download the file from the S3 bucket
+	filename := c.Params("filename")
+	log.Printf("User requested to download file: %s", filename)
+
+	result, err := r.client.GetObject(context.TODO(), &s3.GetObjectInput{
+		Bucket: aws.String(r.bucketName),
+		Key:    aws.String(filename),
+	})
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).
+			JSON(fiber.Map{
+				"error": false,
+				"msg":   fmt.Sprintf("Couldn't download file %s from bucket %s. Reason: %v.\n", filename, r.bucketName, err),
+			})
+	}
+	defer result.Body.Close()
+
+	// Create a temporary file from the downloaded file's contents
+	file, err := os.CreateTemp("/tmp/", "temp-*.txt")
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).
+			JSON(fiber.Map{
+				"error": false,
+				"msg":   fmt.Sprintf("Couldn't create a temporary file to store the downloaded file. Reason: %v.\n", err),
+			})
+	}
+	defer os.Remove(file.Name())
+
+	body, err := io.ReadAll(result.Body)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).
+			JSON(fiber.Map{
+				"error": false,
+				"msg":   fmt.Sprintf("Could not read contents of downloaded file. Reason: %v.\n", err),
+			})
+	}
+
+	byteCount, err := file.Write(body)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).
+			JSON(fiber.Map{
+				"error": false,
+				"msg":   fmt.Sprintf("Could not create temporary file with contents of downloaded file. Reason: %v.\n", err),
+			})
+	}
+	log.Printf("Wrote %d bytes to the temporary file: %s.", byteCount, file.Name())
+
+	log.Printf("Ready to download the file: %s from path: %s", filename, file.Name())
+
+	// Send the file to the client
+	return c.Download(file.Name(), filename)
+}
+
 func main() {
 	// Load environment variables from the .env file
 	err := godotenv.Load()
@@ -136,6 +195,7 @@ func main() {
 
 	app.Post("/", s3.UploadFile)
 	app.Get("/", s3.ListFiles)
+	app.Get("/:filename", s3.DownloadFile)
 
 	log.Fatal(app.Listen(":3000"))
 }
