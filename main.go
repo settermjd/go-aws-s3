@@ -15,6 +15,8 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/joho/godotenv"
+	"github.com/twilio/twilio-go"
+	api "github.com/twilio/twilio-go/rest/api/v2010"
 )
 
 type S3BucketManager struct {
@@ -101,6 +103,8 @@ func (manager S3BucketManager) UploadFile(c *fiber.Ctx) error {
 				"msg":   err.Error(),
 			})
 	}
+
+	SendSMS(file.Filename, manager.bucketName)
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"error": false,
@@ -213,8 +217,8 @@ func main() {
 		log.Fatalf("Could not load the AWS credentials: %v", err)
 	}
 
-	// Create an Amazon S3 service client
 	client := s3.NewFromConfig(cfg)
+
 	manager := S3BucketManager{
 		bucketName: os.Getenv("S3_BUCKET"),
 		client:     client,
@@ -230,4 +234,20 @@ func main() {
 	app.Delete("/:filename", manager.DeleteFile)
 
 	log.Fatal(app.Listen(":3000"))
+}
+
+func SendSMS(fileName, bucketName string) error {
+	params := &api.CreateMessageParams{}
+	params.SetBody(fmt.Sprintf(
+		"File %s has been successfully uploaded to your S3 bucket: %s",
+		fileName,
+		bucketName,
+	))
+	params.SetFrom(os.Getenv("TWILIO_PHONE_NUMBER"))
+	params.SetTo(os.Getenv("RECIPIENT_PHONE_NUMBER"))
+
+	client := twilio.NewRestClient()
+	_, err := client.Api.CreateMessage(params)
+
+	return err
 }
