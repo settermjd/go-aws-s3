@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"os"
 	"time"
 
@@ -20,34 +21,69 @@ import (
 	api "github.com/twilio/twilio-go/rest/api/v2010"
 )
 
+func SendSMS(fileName, bucketName string) error {
+	params := &api.CreateMessageParams{}
+	params.SetBody(fmt.Sprintf(
+		"File %s has been successfully uploaded to your S3 bucket: %s",
+		fileName,
+		bucketName,
+	))
+	params.SetFrom(os.Getenv("TWILIO_PHONE_NUMBER"))
+	params.SetTo(os.Getenv("RECIPIENT_PHONE_NUMBER"))
+
+	client := twilio.NewRestClient()
+	_, err := client.Api.CreateMessage(params)
+
+	return err
+}
+
 type RoutesManager struct {
+	bucket SimpleS3BucketManager
+}
+
+type SimpleS3BucketManager struct {
 	client *s3.Client
 }
 
-type SimpleS3BucketItem struct {
-	Key          *string
-	Size         int64
-	LastModified *time.Time
+func (m SimpleS3BucketManager) DeleteObject(filename string) error {
+	_, err := m.client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+		Bucket: aws.String(os.Getenv("S3_BUCKET")),
+		Key:    &filename,
+	})
+
+	return err
 }
 
-// ListFiles retrieves a list of files from an S3 bucket and returns a short
-// list of them in JSON format
-func (rm RoutesManager) ListFiles(c *fiber.Ctx) error {
-	result, err := rm.client.ListObjectsV2(
+func (m SimpleS3BucketManager) DownloadFile(filename string) (*s3.GetObjectOutput, error) {
+	return m.client.GetObject(context.TODO(), &s3.GetObjectInput{
+		Bucket: aws.String(os.Getenv("S3_BUCKET")),
+		Key:    aws.String(filename),
+	})
+}
+
+func (m SimpleS3BucketManager) UploadFile(file *multipart.FileHeader) (*s3.PutObjectOutput, error) {
+	fileBuffer, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer fileBuffer.Close()
+
+	return m.client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket: aws.String(os.Getenv("S3_BUCKET")),
+		Key:    aws.String(file.Filename),
+		Body:   fileBuffer,
+	})
+}
+
+func (m SimpleS3BucketManager) GetFiles() ([]SimpleS3BucketItem, error) {
+	result, err := m.client.ListObjectsV2(
 		context.TODO(),
 		&s3.ListObjectsV2Input{
 			Bucket: aws.String(os.Getenv("S3_BUCKET")),
 		},
 	)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": true,
-			"msg": fmt.Sprintf(
-				"Couldn't list objects in bucket %s. Reason: %v\n",
-				os.Getenv("S3_BUCKET"),
-				err,
-			),
-		})
+		return nil, err
 	}
 
 	var contents []SimpleS3BucketItem
@@ -60,10 +96,34 @@ func (rm RoutesManager) ListFiles(c *fiber.Ctx) error {
 		contents = append(contents, simpleItem)
 	}
 
+	return contents, nil
+}
+
+type SimpleS3BucketItem struct {
+	Key          *string
+	Size         int64
+	LastModified *time.Time
+}
+
+// ListFiles retrieves a list of files from an S3 bucket and returns a short
+// list of them in JSON format
+func (rm RoutesManager) ListFiles(c *fiber.Ctx) error {
+	files, err := rm.bucket.GetFiles()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": true,
+			"msg": fmt.Sprintf(
+				"Couldn't list objects in bucket %s. Reason: %v\n",
+				os.Getenv("S3_BUCKET"),
+				err,
+			),
+		})
+	}
+
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"error": false,
 		"msg":   "",
-		"items": contents,
+		"items": files,
 	})
 }
 
@@ -78,25 +138,10 @@ func (rm RoutesManager) UploadFile(c *fiber.Ctx) error {
 		})
 	}
 
-	// Attempt to access the contents of the uploaded file
-	fileBuffer, err := file.Open()
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": true,
-			"msg":   err.Error(),
-		})
-	}
-	defer fileBuffer.Close()
-
 	// Upload the file to S3.
-	_, err = rm.client.PutObject(context.TODO(), &s3.PutObjectInput{
-		Bucket: aws.String(os.Getenv("S3_BUCKET")),
-		Key:    aws.String(file.Filename),
-		Body:   fileBuffer,
-	})
+	_, err = rm.bucket.UploadFile(file)
 	if err != nil {
-		return c.
-			Status(fiber.StatusInternalServerError).
+		return c.Status(fiber.StatusInternalServerError).
 			JSON(fiber.Map{
 				"error": true,
 				"msg":   err.Error(),
@@ -120,10 +165,7 @@ func (rm RoutesManager) DownloadFile(c *fiber.Ctx) error {
 	filename := c.Params("filename")
 	log.Printf("User requested to download file: %s", filename)
 
-	result, err := rm.client.GetObject(context.TODO(), &s3.GetObjectInput{
-		Bucket: aws.String(os.Getenv("S3_BUCKET")),
-		Key:    aws.String(filename),
-	})
+	result, err := rm.bucket.DownloadFile(filename)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).
 			JSON(fiber.Map{
@@ -167,7 +209,6 @@ func (rm RoutesManager) DownloadFile(c *fiber.Ctx) error {
 			})
 	}
 	log.Printf("Wrote %d bytes to the temporary file: %s.", byteCount, file.Name())
-
 	log.Printf("Ready to download the file: %s from path: %s", filename, file.Name())
 
 	// Send the file to the client
@@ -186,10 +227,7 @@ func (rm RoutesManager) DeleteFile(c *fiber.Ctx) error {
 	}
 	log.Printf("User requested to download file: %s", filename)
 
-	_, err := rm.client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
-		Bucket: aws.String(os.Getenv("S3_BUCKET")),
-		Key:    &filename,
-	})
+	err := rm.bucket.DeleteObject(filename)
 	if err != nil {
 		return c.Status(fiber.StatusOK).
 			JSON(fiber.Map{
@@ -221,9 +259,11 @@ func main() {
 		log.Fatalf("Could not load the AWS credentials: %v", err)
 	}
 
-	client := s3.NewFromConfig(cfg)
-
-	manager := RoutesManager{client: client}
+	manager := RoutesManager{
+		bucket: SimpleS3BucketManager{
+			client: s3.NewFromConfig(cfg),
+		},
+	}
 
 	app := fiber.New()
 
@@ -239,20 +279,4 @@ func main() {
 	app.Delete("/:filename", manager.DeleteFile)
 
 	log.Fatal(app.Listen(":3000"))
-}
-
-func SendSMS(fileName, bucketName string) error {
-	params := &api.CreateMessageParams{}
-	params.SetBody(fmt.Sprintf(
-		"File %s has been successfully uploaded to your S3 bucket: %s",
-		fileName,
-		bucketName,
-	))
-	params.SetFrom(os.Getenv("TWILIO_PHONE_NUMBER"))
-	params.SetTo(os.Getenv("RECIPIENT_PHONE_NUMBER"))
-
-	client := twilio.NewRestClient()
-	_, err := client.Api.CreateMessage(params)
-
-	return err
 }
