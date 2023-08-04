@@ -15,9 +15,22 @@ After cloning the repository, create a new file in the top-level directory named
 ```ini
 S3_BUCKET="<<S3_BUCKET>>"
 S3_REGION="<<S3_REGION>>"
+
+TWILIO_ACCOUNT_SID="<<TWILIO_ACCOUNT_SID>>"
+TWILIO_AUTH_TOKEN="<<TWILIO_AUTH_TOKEN>>"
+TWILIO_PHONE_NUMBER="<<TWILIO_PHONE_NUMBER>>"
+
+RECIPIENT_PHONE_NUMBER="<<RECIPIENT_PHONE_NUMBER>>"
 ```
 
-Then, replace the two placeholders with the name of your S3 bucket and its [region](https://github.com/aws/aws-cli/issues/3864#issuecomment-454312681), respectively.
+Then: 
+
+- Replace the two placeholders with the name of your S3 bucket and its [region](https://github.com/aws/aws-cli/issues/3864#issuecomment-454312681)
+- Replace the `TWILIO_` prefixed placeholders with your Twilio Account SID, Auth Token, and phone number, which you can find in the Account Info panel, in the [Twilio Console](https://console.twilio.com)'s dashboard.
+- Replace the `RECIPIENT_PHONE_NUMBER` placeholder with an [E.164-formatted](https://www.twilio.com/docs/glossary/what-e164) phone number of the person who will receive SMS from the application
+
+The latter two placeholders are required because an SMS is sent on a successful file upload.
+
 When that's done, start the application running by running the following command.
 
 ```bash
@@ -26,7 +39,7 @@ go run main.go
 
 ## Usage
 
-### Upload an image
+### Upload an object to a bucket
 
 Then, upload a file from your local filesystem to your S3 bucket using your preferred tool of choice. 
 Below, you can see an example which uses [curl](https://curl.se/). 
@@ -35,7 +48,7 @@ Below, you can see an example which uses [curl](https://curl.se/).
 curl -X POST -F file=@<<path/to/your/file>> http://localhost:3000/
 ```
 
-### List all images
+### List all objects in a bucket
 
 To list all images, make a GET request to the default endpoint `/`, as in the example below.
 
@@ -67,3 +80,13 @@ You should see output similar to the following, on success, listing the name, si
     ]
 }
 ```
+
+### Delete an object from a bucket
+
+To delete an object from a bucket, send a DELETE request to the default endpoint, `/`, and supply the name of the object to delete, as in the example below.
+
+```bash
+curl -X DELETE http://localhost:3000/file-1.jpg
+```
+
+If there is an object in the specified bucket by the name of _file-1.jpg_, it should be deleted when the request completes.
