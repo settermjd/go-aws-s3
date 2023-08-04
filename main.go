@@ -22,9 +22,8 @@ import (
 )
 
 type S3BucketManager struct {
-	bucketName string
-	client     *s3.Client
 	session    *session.Session
+	client *s3.Client
 }
 
 type SimpleS3BucketItem struct {
@@ -39,7 +38,7 @@ func (manager S3BucketManager) ListFiles(c *fiber.Ctx) error {
 	result, err := manager.client.ListObjectsV2(
 		context.TODO(),
 		&s3.ListObjectsV2Input{
-			Bucket: aws.String(manager.bucketName),
+			Bucket: aws.String(os.Getenv("S3_BUCKET")),
 		},
 	)
 	if err != nil {
@@ -47,7 +46,7 @@ func (manager S3BucketManager) ListFiles(c *fiber.Ctx) error {
 			"error": true,
 			"msg": fmt.Sprintf(
 				"Couldn't list objects in bucket %s. Reason: %v\n",
-				manager.bucketName,
+				os.Getenv("S3_BUCKET"),
 				err,
 			),
 		})
@@ -93,7 +92,7 @@ func (manager S3BucketManager) UploadFile(c *fiber.Ctx) error {
 
 	// Upload the file to S3.
 	_, err = manager.client.PutObject(context.TODO(), &s3.PutObjectInput{
-		Bucket: aws.String(manager.bucketName),
+		Bucket: aws.String(os.Getenv("S3_BUCKET")),
 		Key:    aws.String(file.Filename),
 		Body:   fileBuffer,
 	})
@@ -106,7 +105,7 @@ func (manager S3BucketManager) UploadFile(c *fiber.Ctx) error {
 			})
 	}
 
-	SendSMS(file.Filename, manager.bucketName)
+	SendSMS(file.Filename, os.Getenv("S3_BUCKET"))
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"error": false,
@@ -124,14 +123,19 @@ func (manager S3BucketManager) DownloadFile(c *fiber.Ctx) error {
 	log.Printf("User requested to download file: %s", filename)
 
 	result, err := manager.client.GetObject(context.TODO(), &s3.GetObjectInput{
-		Bucket: aws.String(manager.bucketName),
+		Bucket: aws.String(os.Getenv("S3_BUCKET")),
 		Key:    aws.String(filename),
 	})
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).
 			JSON(fiber.Map{
 				"error": true,
-				"msg":   fmt.Sprintf("Couldn't download file %s from bucket %s. Reason: %v.\n", filename, manager.bucketName, err),
+				"msg": fmt.Sprintf(
+					"Couldn't download file %s from bucket %s. Reason: %v.\n",
+					filename,
+					os.Getenv("S3_BUCKET"),
+					err,
+				),
 			})
 	}
 	defer result.Body.Close()
@@ -185,7 +189,7 @@ func (manager S3BucketManager) DeleteFile(c *fiber.Ctx) error {
 	log.Printf("User requested to download file: %s", filename)
 
 	_, err := manager.client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
-		Bucket: &manager.bucketName,
+		Bucket: aws.String(os.Getenv("S3_BUCKET")),
 		Key:    &filename,
 	})
 	if err != nil {
@@ -221,10 +225,7 @@ func main() {
 
 	client := s3.NewFromConfig(cfg)
 
-	manager := S3BucketManager{
-		bucketName: os.Getenv("S3_BUCKET"),
-		client:     client,
-	}
+	manager := S3BucketManager{client: client}
 
 	app := fiber.New()
 
