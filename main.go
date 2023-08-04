@@ -20,7 +20,7 @@ import (
 	api "github.com/twilio/twilio-go/rest/api/v2010"
 )
 
-type S3BucketManager struct {
+type RoutesManager struct {
 	client *s3.Client
 }
 
@@ -32,8 +32,8 @@ type SimpleS3BucketItem struct {
 
 // ListFiles retrieves a list of files from an S3 bucket and returns a short
 // list of them in JSON format
-func (manager S3BucketManager) ListFiles(c *fiber.Ctx) error {
-	result, err := manager.client.ListObjectsV2(
+func (rm RoutesManager) ListFiles(c *fiber.Ctx) error {
+	result, err := rm.client.ListObjectsV2(
 		context.TODO(),
 		&s3.ListObjectsV2Input{
 			Bucket: aws.String(os.Getenv("S3_BUCKET")),
@@ -68,7 +68,7 @@ func (manager S3BucketManager) ListFiles(c *fiber.Ctx) error {
 }
 
 // UploadFile uploads a file received in a POST request to an S3 bucket
-func (manager S3BucketManager) UploadFile(c *fiber.Ctx) error {
+func (rm RoutesManager) UploadFile(c *fiber.Ctx) error {
 	// Attempt to retrieve the uploaded file
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -89,7 +89,7 @@ func (manager S3BucketManager) UploadFile(c *fiber.Ctx) error {
 	defer fileBuffer.Close()
 
 	// Upload the file to S3.
-	_, err = manager.client.PutObject(context.TODO(), &s3.PutObjectInput{
+	_, err = rm.client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket: aws.String(os.Getenv("S3_BUCKET")),
 		Key:    aws.String(file.Filename),
 		Body:   fileBuffer,
@@ -115,12 +115,12 @@ func (manager S3BucketManager) UploadFile(c *fiber.Ctx) error {
 // file with the downloaded file's contents, before using Fiber's Download()
 // method to send the file to the client. For more information, check out
 // https://docs.gofiber.io/api/ctx#download
-func (manager S3BucketManager) DownloadFile(c *fiber.Ctx) error {
+func (rm RoutesManager) DownloadFile(c *fiber.Ctx) error {
 	// Download the file from the S3 bucket
 	filename := c.Params("filename")
 	log.Printf("User requested to download file: %s", filename)
 
-	result, err := manager.client.GetObject(context.TODO(), &s3.GetObjectInput{
+	result, err := rm.client.GetObject(context.TODO(), &s3.GetObjectInput{
 		Bucket: aws.String(os.Getenv("S3_BUCKET")),
 		Key:    aws.String(filename),
 	})
@@ -175,7 +175,7 @@ func (manager S3BucketManager) DownloadFile(c *fiber.Ctx) error {
 }
 
 // DeleteFile deletes a single file/object from an S3 bucket.
-func (manager S3BucketManager) DeleteFile(c *fiber.Ctx) error {
+func (rm RoutesManager) DeleteFile(c *fiber.Ctx) error {
 	filename := c.Params("filename")
 	if len(filename) == 0 {
 		return c.Status(fiber.StatusOK).
@@ -186,7 +186,7 @@ func (manager S3BucketManager) DeleteFile(c *fiber.Ctx) error {
 	}
 	log.Printf("User requested to download file: %s", filename)
 
-	_, err := manager.client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+	_, err := rm.client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
 		Bucket: aws.String(os.Getenv("S3_BUCKET")),
 		Key:    &filename,
 	})
@@ -223,7 +223,7 @@ func main() {
 
 	client := s3.NewFromConfig(cfg)
 
-	manager := S3BucketManager{client: client}
+	manager := RoutesManager{client: client}
 
 	app := fiber.New()
 
